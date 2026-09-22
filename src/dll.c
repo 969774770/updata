@@ -1,7 +1,7 @@
-/* updata32.dll / updata64.dll —— 更新检测模块（供易语言等宿主程序调用）
+/* updata32.dll / updata64.dll —— 更新检测模块（供宿主程序调用）
  *
  * 导出函数（__stdcall）：
- *   int updata(const char *url, const char *args);         // 参数为 ANSI/GBK 文本（易语言 文本型）
+ *   int updata(const char *url, const char *args);         // 参数为 ANSI/GBK 文本（本机代码页）
  *   int updata_w(const wchar_t *url, const wchar_t *args); // 参数为 Unicode 文本
  *
  * 返回值：
@@ -285,7 +285,7 @@ done:
     return rc;
 }
 
-/* ANSI/GBK -> Unicode（易语言 文本型传进来的是本机代码页的字节） */
+/* ANSI/GBK -> Unicode（宿主传入的是本机代码页的字节） */
 static wchar_t *ansi_to_w(const char *s)
 {
     int n;

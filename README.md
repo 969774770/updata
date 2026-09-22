@@ -1,12 +1,12 @@
 # updata
 
-Windows 平台的**差异化自动更新**程序，外加一个可供**易语言**等宿主程序调用的更新检测 DLL。纯 C + Win32 API 实现，无第三方依赖。
+Windows 平台的**差异化自动更新**客户端，由两部分组成：带界面的更新程序 `updata.exe`，以及供宿主程序调用的更新检测 DLL。纯 C + Win32 API 实现，无第三方依赖。
 
 | 文件 | 说明 |
 | --- | --- |
 | `updata.exe` | 带界面的更新程序：按服务端清单做 SHA-256 差异比对、多线程下载、校验后替换、占用检测与自动解锁，更新完成后可自动启动新版本 |
-| `updata32.dll` | 更新检测模块（32 位，易语言用这个）：只判断"是否需要更新"，需要更新时释放内嵌的 `updata.exe` 并结束宿主进程，实现"启动即自更新" |
-| `updata64.dll` | 同上，64 位宿主使用 |
+| `updata32.dll` | 更新检测模块（32 位宿主用）：只判断"是否需要更新"，需要更新时释放内嵌的 `updata.exe` 并结束宿主进程，实现"启动即自更新" |
+| `updata64.dll` | 同上，64 位宿主用 |
 
 ## 特性
 
@@ -20,6 +20,26 @@ Windows 平台的**差异化自动更新**程序，外加一个可供**易语言
 | 界面 | 表格化文件列表（文件名/目录/大小/进度/速度/状态/说明）、总体进度条、实时速度、剩余时间、耗时统计 |
 | 不暴露接口 | 日志只记文件名、大小、错误码，不记录更新接口地址（避免泄露 `software_key`） |
 | 单文件部署 | DLL 内已压缩内嵌 `updata.exe`，接入时只需要分发 DLL |
+
+## 与 SPMS 的关系
+
+本仓库是**客户端更新端**，[SPMS](https://github.com/969774770/spms) 是配套的**软件发布端**，两者配套使用：
+
+| 项目 | 角色 | 职责 |
+| --- | --- | --- |
+| [SPMS](https://github.com/969774770/spms) | 发布端（服务端） | 软件/版本与文件管理、上传与内容寻址存储、生成并下发更新清单，对外提供更新检测与文件下载接口 |
+| updata（本仓库） | 更新端（客户端） | 按 SPMS 下发的清单做 SHA-256 差异比对，下载变化的文件并校验替换，完成后按约定自动启动程序 |
+
+数据流：
+
+```
+SPMS 后台发布新版本/上传文件
+        │  生成清单（含每个文件的 path/name/size/hash/url 与 active、auto_run、force_overwrite 标记）
+        ▼
+updata 拉取清单 ──► 与本地文件逐一对 SHA-256 ──► 只下载有变化的文件 ──► 校验后替换 ──► 启动新版本
+```
+
+本 README 中[服务端接口约定](#服务端接口约定)一节描述的 JSON 结构，就是 SPMS 对外提供的更新接口契约；`url` 字段指向的下载接口同样由 SPMS 提供（两者共用同一套 `software_key` 标识软件）。
 
 ## 目录结构
 
@@ -80,7 +100,7 @@ updata.exe "https://your-server.example/api.php?action=client.files&software_key
 
 ## 服务端接口约定
 
-`GET` 请求返回 JSON：
+以下接口由 [SPMS](https://github.com/969774770/spms) 发布端提供。`GET` 请求返回 JSON：
 
 ```json
 {
@@ -131,34 +151,27 @@ updata.exe "https://your-server.example/api.php?action=client.files&software_key
 | hash 不一致 且 `force_overwrite = true` | 需要更新（覆盖） |
 | hash 不一致 且 `force_overwrite = false` | 跳过（文件已存在即可） |
 
-## DLL 接入（易语言）
+## DLL 接入
 
-### 1. 声明
+### 1. 声明与调用
 
-```
-.版本 2
+```c
+/* updata32.dll（32 位宿主）或 updata64.dll（64 位宿主），stdcall 约定，导出名未修饰 */
+typedef int (__stdcall *UPDATA_FN)(const char *url, const char *args);
 
-.DLL命令 检测更新, 整数型, "updata32.dll", "updata", 公开, 返回0=无需更新,1=已启动更新并结束本进程,负值=检测失败
-    .参数 更新地址, 文本型
-    .参数 附加命令, 文本型
-```
+/* url  ：更新检测地址
+   args ：更新完成后启动 auto_run 文件时追加的命令行，可传 "" 或 NULL */
+int ret = updata("https://your-server.example/api.php?action=client.files&software_key=xxxx",
+                 "--login user");
 
-> `updata` 接收 ANSI/GBK 文本（易语言默认即为此）；若宿主是 Unicode/宽字符环境，请改用导出函数 `updata_w`。
-
-### 2. 调用
-
-```
-.子程序 __启动窗口_创建完毕
-
-.局部变量 ret, 整数型
-
-ret ＝ 检测更新 (“https://your-server.example/api.php?action=client.files&software_key=xxxx”, “--login user”)
-' ret = 0 ：无需更新，继续正常启动
-' ret = 1 ：不会执行到这里 —— 更新程序已启动，本进程已被结束
-' ret < 0 ：检测失败（网络/服务器/参数/释放失败），按“无需更新”处理，继续运行
+/* 需要更新时：已释放并启动 updata.exe，随后本进程被结束，不会返回 1 */
+/* 返回 0 ：无需更新，继续正常启动
+   返回 <0：检测失败，按“无需更新”处理，继续运行 */
 ```
 
-### 3. 返回值
+> `updata` 接收 ANSI/GBK 文本（本机代码页，中文开发工具的“文本型”参数即为该编码）；若宿主是 Unicode/宽字符环境，请改用导出函数 `updata_w`。
+
+### 2. 返回值
 
 | 返回值 | 含义 |
 | --- | --- |
@@ -168,11 +181,11 @@ ret ＝ 检测更新 (“https://your-server.example/api.php?action=client.files
 | `-2` | 参数为空 |
 | `-3` | 更新程序释放或启动失败 |
 
-### 4. 部署与执行流程
+### 3. 部署与执行流程
 
 ```
 宿主程序目录/
-  主程序.exe        ← 易语言程序
+  主程序.exe        ← 宿主程序（更新目标就是这个目录）
   updata32.dll      ← 只需分发这个（updata.exe 已压缩内嵌）
 ```
 
