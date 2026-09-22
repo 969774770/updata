@@ -1,0 +1,28 @@
+/* 资源文件：1=应用清单（启用 comctl32 v6 视觉样式 + DPI 感知）
+   注意：XML 内容必须是 ASCII/UTF-8 无 BOM，windres 直接透传 */
+1 24 "updata.manifest"
+
+1 VERSIONINFO
+FILEVERSION     1,0,0,0
+PRODUCTVERSION  1,0,0,0
+FILEOS          0x40004L
+FILETYPE        0x1L
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "080404b0"
+    BEGIN
+      VALUE "CompanyName",      "updata"
+      VALUE "FileDescription",  "Differences updater"
+      VALUE "FileVersion",      "1.0.0.0"
+      VALUE "InternalName",     "updata"
+      VALUE "OriginalFilename", "updata.exe"
+      VALUE "ProductName",      "updata"
+      VALUE "ProductVersion",   "1.0.0.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x804, 1200
+  END
+END

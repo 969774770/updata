@@ -1,0 +1,6 @@
+/* DLL 资源：把 updata.exe 内嵌进来
+   编译前请先执行 build.bat 生成 updata.exe，并用 tools/pack.exe 压成 build\payload.bin
+   语言用中性(0,0)，保证中文系统下 FindResource 也能找到 */
+LANGUAGE 0, 0
+
+101 RCDATA "build\\payload.bin"

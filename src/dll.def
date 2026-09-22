@@ -1,0 +1,5 @@
+; updata32.dll / updata64.dll 导出表
+; 用 .def 导出可避免 __stdcall 的名字修饰（_updata@8），保证易语言能按名字找到
+EXPORTS
+    updata
+    updata_w
