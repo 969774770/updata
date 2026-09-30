@@ -94,6 +94,7 @@ static int   g_detailHover;
 static int   g_mouseTracked;
 static int   *g_lastPercent;
 static LONG  *g_lastState;
+static int   g_lastCap;          /* 上面两个数组的实际容量（元素个数），0 表示尚未分配 */
 static DWORD g_lastTick;
 static unsigned long long g_lastBytes;
 static unsigned long long g_bytesDone;
@@ -678,12 +679,17 @@ static void draw_progress_cell(LPNMLVCUSTOMDRAW cd)
     HDC hdc = cd->nmcd.hdc;
     HWND hList = cd->nmcd.hdr.hwndFrom;
     RECT rc, bar, txt, r;
-    FileTask *t = &g_app.files[item];
-    LONG st = t->state;
+    FileTask *t;
+    LONG st;
     int pct = 0, selected;
     COLORREF bg, fill, fg;
     wchar_t buf[32];
     unsigned long long got;
+
+    /* 列表项数可能短时间多于清单条目（重新获取清单时），越界直接跳过 */
+    if (!g_app.files || item < 0 || item >= g_app.fileCount) return;
+    t = &g_app.files[item];
+    st = t->state;
 
     if (ListView_GetSubItemRect(hList, item, COL_PROGRESS, LVIR_BOUNDS, &rc) == FALSE) return;
 
@@ -773,7 +779,9 @@ static LRESULT list_custom_draw(LPNMLVCUSTOMDRAW cd)
             return CDRF_NEWFONT;
         }
         if (cd->iSubItem == COL_STATE) {
-            LONG st = g_app.files[item].state;
+            LONG st;
+            if (!g_app.files || item < 0 || item >= g_app.fileCount) return CDRF_DODEFAULT;
+            st = g_app.files[item].state;
             cd->clrText = state_color(st);
             return CDRF_NEWFONT;
         }
@@ -1219,6 +1227,15 @@ static void refresh_stats(void)
 
     if (dt == 0) dt = 1;
 
+    /* 清单未就绪或正在重新获取时不做统计：files/fileCount 由后台线程改写，指针可能为空 */
+    if (!g_app.files || g_app.fileCount <= 0) {
+        g_lastTick = now;
+        g_lastBytes = 0;
+        g_bytesDone = 0;
+        g_speed = 0;
+        return;
+    }
+
     EnterCriticalSection(&g_statsLock);
     for (i = 0; i < g_app.fileCount; ++i) {
         FileTask *t = &g_app.files[i];
@@ -1249,7 +1266,10 @@ static void refresh_rows(void)
     wchar_t buf[64], sp[64];
     unsigned long long got;
 
-    if (!g_hList || !g_app.files) return;
+    /* 状态缓存数组由 on_fetch_done 分配；清单未就绪、正在重新获取或缓存未建好时直接跳过，
+       否则定时器会解引用空指针（表现为窗口刚出现就 0xC0000005 崩溃） */
+    if (!g_hList || !g_app.files || !g_lastState || !g_lastPercent) return;
+    if (g_app.fileCount > g_lastCap) return;
 
     for (i = 0; i < g_app.fileCount; ++i) {
         FileTask *t = &g_app.files[i];
@@ -1336,8 +1356,11 @@ static void on_fetch_done(void)
     if (g_lastState) free(g_lastState);
     g_lastPercent = (int *)calloc((size_t)(g_app.fileCount + 1), sizeof(int));
     g_lastState = (LONG *)calloc((size_t)(g_app.fileCount + 1), sizeof(LONG));
+    g_lastCap = (g_lastPercent && g_lastState) ? g_app.fileCount : 0;   /* 分配失败则容量记 0，刷新时跳过 */
+    if (g_lastCap) {
+        for (i = 0; i < g_app.fileCount; ++i) g_lastState[i] = -1;
+    }
     for (i = 0; i < g_app.fileCount; ++i) {
-        g_lastState[i] = -1;
         if (g_app.files[i].needUpdate) need++;
     }
 
@@ -1610,9 +1633,9 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         if (id == IDC_BTN_RETRY) {
             set_status(L"正在获取更新信息...");
-            if (g_lastState && g_app.fileCount) {
+            if (g_lastState) {
                 int i;
-                for (i = 0; i < g_app.fileCount; ++i) g_lastState[i] = -1;
+                for (i = 0; i < g_lastCap; ++i) g_lastState[i] = -1;
             }
             update_start_fetch(hwnd);
             return 0;
