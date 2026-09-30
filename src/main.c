@@ -1743,12 +1743,16 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmdLine, int nCmdSh
     g_hInst = hInst;
     update_init();
 
+    /* 运行在 DLL 释放出来的临时目录时：清掉以往遗留的副本，并安排退出时自删 */
+    util_cleanup_self_copy();
+
     /* 命令行参数：1=更新检测地址，2..=附加命令行 */
     argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (!argv || argc < 2) {
         /* 未提供更新地址：不弹提示，直接退出（返回码 2） */
         util_log(L"[启动] 未提供更新检测地址，程序退出");
         if (argv) LocalFree(argv);
+        util_schedule_self_delete();
         return 2;
     }
     lstrcpynW(g_app.baseUrl, argv[1], 2048);
@@ -1834,5 +1838,6 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmdLine, int nCmdSh
     }
 
     update_free_all();
+    util_schedule_self_delete();       /* 临时副本：安排退出后删除自己，不留残留 */
     return 0;
 }

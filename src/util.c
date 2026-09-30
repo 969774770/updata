@@ -287,3 +287,77 @@ void util_log(const wchar_t *fmt, ...)
     fclose(f);
     free(utf8);
 }
+
+/* DLL 把 exe 释放到 %TEMP%\updata_run\ 后启动本程序。临时副本的收尾分两步：
+     util_cleanup_self_copy()     启动时：清掉以往遗留下来的旧副本
+     util_schedule_self_delete()  退出前：安排删除当前这个副本
+   只有“运行在临时副本里”时才动手：exe 所在目录与更新目标目录不同即为该情况；
+   直接放在软件目录里运行（两者相同）不做任何清理。 */
+
+static int g_self_is_temp_copy = 0;
+
+void util_cleanup_self_copy(void)
+{
+    const wchar_t *exe_dir = util_exe_dir();
+    const wchar_t *tgt_dir = util_target_dir();
+    wchar_t self[MAX_PATH];
+    wchar_t pattern[MAX_PATH];
+    WIN32_FIND_DATAW fd;
+    HANDLE h;
+    int removed = 0;
+
+    if (_wcsicmp(exe_dir, tgt_dir) == 0) return;          /* 直接运行在软件目录：不动任何文件 */
+    g_self_is_temp_copy = 1;
+    if (GetModuleFileNameW(NULL, self, MAX_PATH) == 0) return;
+
+    _snwprintf(pattern, MAX_PATH, L"%supdata*.exe", exe_dir);
+    pattern[MAX_PATH - 1] = 0;
+
+    h = FindFirstFileW(pattern, &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            wchar_t full[MAX_PATH];
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+            _snwprintf(full, MAX_PATH, L"%s%s", exe_dir, fd.cFileName);
+            full[MAX_PATH - 1] = 0;
+            if (_wcsicmp(full, self) == 0) continue;      /* 自己由退出时的删除处理 */
+            if (DeleteFileW(full)) removed++;             /* 正在被占用则删除失败，跳过即可 */
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    if (removed > 0) util_log(L"[清理] 已删除 %d 个遗留的更新程序副本", removed);
+}
+
+void util_schedule_self_delete(void)
+{
+    wchar_t self[MAX_PATH];
+    wchar_t cmd[MAX_PATH * 2];
+    wchar_t comspec[MAX_PATH];
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+
+    if (!g_self_is_temp_copy) return;
+    if (GetModuleFileNameW(NULL, self, MAX_PATH) == 0) return;
+
+    /* 运行中的 exe 无法删除自己（DeleteFile / DELETE_ON_CLOSE 都会被系统拒绝，
+       父进程替它设置也一样），因此交给一个短命 cmd：等约 2 秒（本进程应已退出）后删除。
+       万一没删掉，下次运行时的清扫会兜底。 */
+    _snwprintf(cmd, MAX_PATH * 2, L"/c ping -n 3 127.0.0.1 >nul & del /f /q \"%s\"", self);
+    cmd[MAX_PATH * 2 - 1] = 0;
+
+    if (GetEnvironmentVariableW(L"COMSPEC", comspec, MAX_PATH) == 0) lstrcpynW(comspec, L"cmd.exe", MAX_PATH);
+
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    ZeroMemory(&pi, sizeof(pi));
+
+    if (CreateProcessW(comspec, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        util_log(L"[清理] 已安排退出后删除临时副本");
+    } else {
+        util_log(L"[清理] 安排删除临时副本失败（错误 %lu），下次运行时会清理", GetLastError());
+    }
+}

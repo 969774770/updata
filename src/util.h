@@ -37,4 +37,9 @@ void util_fmt_time(unsigned long long secs, wchar_t *out, int cap);
 /* 写日志到 exe 目录下 updata.log（UTF-8） */
 void util_log(const wchar_t *fmt, ...);
 
+/* DLL 释放出来的临时副本：启动时清掉同目录遗留的旧副本，退出前安排删除自身。
+   直接运行在软件目录（exe 目录 == 更新目标目录）时什么都不做 */
+void util_cleanup_self_copy(void);
+void util_schedule_self_delete(void);
+
 #endif
