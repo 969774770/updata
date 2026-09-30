@@ -392,8 +392,13 @@ int update_launch_autorun(void)
         STARTUPINFOW si;
         PROCESS_INFORMATION pi;
 
-        if (!t->autoRun || !t->needUpdate) continue;
-        if (t->state != FS_DONE) continue;
+        if (!t->autoRun || !t->active) continue;
+        /* 需要更新但没能更新成功（失败/被占用/已取消）时不启动，避免拉起半旧的程序；
+           已经是最新（无需更新）的文件同样要启动 —— 否则宿主程序被结束更新后就不会再起来 */
+        if (t->needUpdate && t->state != FS_DONE) {
+            util_log(L"[自动运行] 跳过未更新成功的文件：%s", t->nameW);
+            continue;
+        }
 
         if (g_app.extraArgs[0]) _snwprintf(cmd, MAX_PATH * 3, L"\"%s\" %s", t->fullPath, g_app.extraArgs);
         else _snwprintf(cmd, MAX_PATH * 3, L"\"%s\"", t->fullPath);
@@ -413,5 +418,6 @@ int update_launch_autorun(void)
         }
     }
     g_app.launchedCount = launched;
+    if (launched == 0) util_log(L"[自动运行] 没有需要启动的文件");
     return launched;
 }

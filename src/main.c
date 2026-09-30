@@ -1395,23 +1395,28 @@ static void on_update_done(void)
         return;
     }
 
+    /* 无论是否有失败/跳过，都尝试启动 auto_run 文件：
+       需要更新却没更新成功的文件会在 update_launch_autorun 内部被跳过 */
+    launched = update_launch_autorun();
+
     if (g_app.failCount == 0 && g_app.skipCount == 0) {
-        launched = update_launch_autorun();
         if (launched > 0) {
             _snwprintf(buf, 512, L"更新完成，已启动 %d 个程序，窗口将在 3 秒后自动关闭。", launched);
         } else {
             _snwprintf(buf, 512, L"更新完成，共更新 %d 个文件（耗时 %lu 秒）。",
                        g_app.doneCount, (unsigned long)(elapsed / 1000));
         }
-        set_status(buf);
-        util_log(L"[完成] %s", buf);
         g_closeCountdown = 3;
         SetTimer(g_hMain, TIMER_CLOSE, 1000, NULL);
+    } else if (launched > 0) {
+        _snwprintf(buf, 512, L"更新结束：成功 %d 个，失败 %d 个，跳过 %d 个；已启动 %d 个程序。",
+                   g_app.doneCount, g_app.failCount, g_app.skipCount, launched);
     } else {
         _snwprintf(buf, 512, L"更新结束：成功 %d 个，失败 %d 个，跳过 %d 个。可点击“开始更新”重试。",
                    g_app.doneCount, g_app.failCount, g_app.skipCount);
-        set_status(buf);
     }
+    set_status(buf);
+    util_log(L"[完成] %s", buf);
     update_ui_state();
 }
 
